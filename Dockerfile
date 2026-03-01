@@ -26,6 +26,8 @@ ARG YQ_VERSION=4.45.1
 # ============================================================================
 FROM ubuntu:${UBUNTU_VERSION} AS downloader
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ARG TARGETARCH
 
 ARG AWSCLI_VERSION
@@ -110,6 +112,8 @@ RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
 # Stage 2: final — assemble the runtime image
 # ============================================================================
 FROM ubuntu:${UBUNTU_VERSION} AS final
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG NODE_MAJOR
 ARG TARGETARCH
