@@ -1,84 +1,196 @@
-# Stage 1: Build stage
-FROM ubuntu as builder
+# syntax=docker/dockerfile:1
+# ============================================================================
+# Builder — pre-configured dev environment for debugging and building images
+# ============================================================================
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    unzip \
-    gnupg \
-    software-properties-common \
-    apt-transport-https \
-    ca-certificates \
-    lsb-release \
-    jq \
-    vim \
+# ---------------------------------------------------------------------------
+# Pinned tool versions — update these ARGs to bump versions
+# ---------------------------------------------------------------------------
+ARG UBUNTU_VERSION=24.04
+
+ARG AWSCLI_VERSION=2.24.4
+ARG GCLOUD_VERSION=514.0.0
+ARG VAULT_VERSION=1.18.4
+ARG GO_VERSION=1.23.5
+ARG NODE_MAJOR=22
+ARG KUBECTL_VERSION=1.32.1
+ARG HELM_VERSION=3.17.0
+ARG TERRAFORM_VERSION=1.10.5
+ARG TRIVY_VERSION=0.58.2
+ARG HADOLINT_VERSION=2.12.0
+ARG DIVE_VERSION=0.12.0
+ARG YQ_VERSION=4.45.1
+
+# ============================================================================
+# Stage 1: downloader — fetch and extract standalone binaries
+# ============================================================================
+FROM ubuntu:${UBUNTU_VERSION} AS downloader
+
+ARG TARGETARCH
+
+ARG AWSCLI_VERSION
+ARG GCLOUD_VERSION
+ARG VAULT_VERSION
+ARG GO_VERSION
+ARG KUBECTL_VERSION
+ARG HELM_VERSION
+ARG TERRAFORM_VERSION
+ARG TRIVY_VERSION
+ARG HADOLINT_VERSION
+ARG DIVE_VERSION
+ARG YQ_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install AWS CLI
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"; \
-    elif [ "$ARCH" = "arm64" ]; then \
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"; \
-    else \
-    echo "Unsupported architecture: $ARCH"; exit 1; \
-    fi && \
-    unzip awscliv2.zip && \
-    ./aws/install
+WORKDIR /staging
 
-# Install gcloud CLI
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
-    && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update && apt-get install -y google-cloud-sdk
+# --- AWS CLI v2 ---
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_SUFFIX}-${AWSCLI_VERSION}.zip" -o awscli.zip \
+    && unzip -q awscli.zip \
+    && ./aws/install --install-dir /opt/aws-cli --bin-dir /usr/local/bin \
+    && rm -rf awscli.zip aws/
 
-# Install HashiCorp Vault
-RUN curl -fsSL https://apt.releases.hashicorp.com/gpg | apt-key add - \
-    && apt-add-repository "deb [arch=$(dpkg --print-architecture)] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
-    && apt-get update && apt-get install -y vault
+# --- Google Cloud CLI ---
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm" || echo "x86_64") \
+    && curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_VERSION}-linux-${ARCH_SUFFIX}.tar.gz" \
+       | tar -xz -C /opt \
+    && /opt/google-cloud-sdk/install.sh --quiet --path-update=false
 
-# Bug found here -> https://github.com/hashicorp/vault/issues/10924
-RUN setcap -r /usr/bin/vault
+# --- HashiCorp Vault ---
+RUN curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_${TARGETARCH}.zip" -o vault.zip \
+    && unzip -q vault.zip -d /usr/local/bin \
+    && rm vault.zip
 
-# Install Azure CLI
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+# --- Go ---
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" \
+       | tar -xz -C /usr/local
 
-# Install programming languages
-RUN apt-get update --fix-missing && apt-get install -y \
-    openjdk-11-jdk \
-    openjdk-11-jre-headless \
-    golang-go \
-    python3 \
-    python3-pip \
-    nodejs \
-    npm \
-    ruby \
+# --- kubectl ---
+RUN curl -fsSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
+       -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl
+
+# --- Helm ---
+RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.tar.gz" \
+       | tar -xz --strip-components=1 -C /usr/local/bin linux-${TARGETARCH}/helm
+
+# --- Terraform ---
+RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip" -o terraform.zip \
+    && unzip -q terraform.zip -d /usr/local/bin \
+    && rm terraform.zip
+
+# --- Trivy ---
+RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TARGETARCH}.tar.gz" \
+       | tar -xz -C /usr/local/bin trivy
+
+# --- hadolint ---
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x86_64") \
+    && curl -fsSL "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-${ARCH_SUFFIX}" \
+       -o /usr/local/bin/hadolint \
+    && chmod +x /usr/local/bin/hadolint
+
+# --- dive ---
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
+    && curl -fsSL "https://github.com/wagoodman/dive/releases/download/v${DIVE_VERSION}/dive_${DIVE_VERSION}_linux_${ARCH_SUFFIX}.tar.gz" \
+       | tar -xz -C /usr/local/bin dive
+
+# --- yq ---
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${ARCH_SUFFIX}" \
+       -o /usr/local/bin/yq \
+    && chmod +x /usr/local/bin/yq
+
+
+# ============================================================================
+# Stage 2: final — assemble the runtime image
+# ============================================================================
+FROM ubuntu:${UBUNTU_VERSION} AS final
+
+ARG NODE_MAJOR
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/opt/google-cloud-sdk/bin:/usr/local/go/bin:${PATH}"
+
+# --- System packages, debugging tools, and build utilities ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        # core utilities
+        ca-certificates \
+        curl \
+        gnupg \
+        unzip \
+        jq \
+        vim \
+        git \
+        make \
+        wget \
+        shellcheck \
+        # debugging
+        strace \
+        ltrace \
+        tcpdump \
+        net-tools \
+        dnsutils \
+        htop \
+        # python
+        python3 \
+        python3-pip \
+        python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# --- Azure CLI via pip in a venv (no piped scripts) ---
+RUN python3 -m venv /opt/azure-cli \
+    && /opt/azure-cli/bin/pip install --no-cache-dir azure-cli \
+    && ln -s /opt/azure-cli/bin/az /usr/local/bin/az
 
-# Set python3 as default python
-RUN export python=python3 && export pip=pip3
+# --- Node.js via NodeSource (pinned major version) ---
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set PATH for AWS CLI and Rust
-ENV PATH="/usr/local/aws-cli/v2/current/bin:$PATH"
-ENV PATH="/root/.cargo/bin:$PATH"
+# --- Docker CLI + buildx from official Docker apt repo ---
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+       | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
+    && echo "deb [arch=${TARGETARCH} signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        docker-ce-cli \
+        docker-buildx-plugin \
+    && rm -rf /var/lib/apt/lists/*
 
-# Verify installations
-RUN aws --version \
-    && gcloud --version \
-    && vault --version \
-    && az --version \
-    && jq --version \
-    && java -version \
-    && go version \
-    && python3 --version \
-    && node --version \
-    && npm --version \
-    && ruby --version \
-    && rustc --version
+# --- Copy binaries from downloader stage ---
+COPY --from=downloader /opt/aws-cli           /opt/aws-cli
+COPY --from=downloader /usr/local/bin/aws     /usr/local/bin/aws
+COPY --from=downloader /usr/local/bin/aws_completer /usr/local/bin/aws_completer
+COPY --from=downloader /opt/google-cloud-sdk  /opt/google-cloud-sdk
+COPY --from=downloader /usr/local/bin/vault   /usr/local/bin/vault
+COPY --from=downloader /usr/local/go          /usr/local/go
+COPY --from=downloader /usr/local/bin/kubectl  /usr/local/bin/kubectl
+COPY --from=downloader /usr/local/bin/helm     /usr/local/bin/helm
+COPY --from=downloader /usr/local/bin/terraform /usr/local/bin/terraform
+COPY --from=downloader /usr/local/bin/trivy    /usr/local/bin/trivy
+COPY --from=downloader /usr/local/bin/hadolint /usr/local/bin/hadolint
+COPY --from=downloader /usr/local/bin/dive     /usr/local/bin/dive
+COPY --from=downloader /usr/local/bin/yq       /usr/local/bin/yq
 
-# Clean up unnecessary files
-RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# --- Vault capability fix (https://github.com/hashicorp/vault/issues/10924) ---
+RUN setcap -r /usr/local/bin/vault || true
+
+# --- Validation script ---
+COPY scripts/validate-tools.sh /usr/local/bin/validate-tools.sh
+
+# --- OCI labels ---
+LABEL org.opencontainers.image.title="builder" \
+      org.opencontainers.image.description="Pre-configured dev environment for debugging and building images" \
+      org.opencontainers.image.source="https://github.com/decima-cloud/builder" \
+      org.opencontainers.image.licenses="MIT"
 
 CMD ["bash"]
