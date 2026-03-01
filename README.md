@@ -1,91 +1,151 @@
 # Builder
 
-Builder is a base Dockerfile designed to streamline the development process by providing a pre-configured environment with commonly used tools and programming languages. This Dockerfile is intended for the community to help get things done faster and more efficiently.
+![Validation](https://img.shields.io/github/actions/workflow/status/decima-cloud/builder/build.yaml?branch=main&label=build)
 
-## Features
+Pre-configured Docker image for debugging, building other images, and working with cloud infrastructure. Ships with pinned versions of cloud CLIs, container tools, languages, and debugging utilities.
 
-One of the best/worst feature of this project is that the images are rebuilt every day at midnight so they will always have security patches built in.
+## Quick Start
 
-- **Multi-architecture support**: Supports both `amd64` and `arm64` architectures.
-- **Pre-installed tools**:
-  - AWS CLI
-  - Google Cloud SDK (gcloud CLI)
-  - Azure CLI
-  - HashiCorp Vault
-  - jq
-- **Pre-installed programming languages**:
-  - Java (OpenJDK 11)
-  - Go
-  - Python 3
-  - Node.js and npm
-  - Ruby
-  - Rust
-- **Optimized for size**: Uses multi-stage builds to minimize the final image size.
+```sh
+docker pull ghcr.io/decima-cloud/builder:latest
+docker run --rm -it ghcr.io/decima-cloud/builder:latest
+```
 
 ## Supported Platforms
 
-You would download this by doing something like `docker pull ghcr.io/decima-cloud/builder:macOS-amd64`. where the tag could be any supported platform
-Builder supports the following platforms:
+| OS    | Architecture |
+|-------|-------------|
+| Linux | amd64       |
+| Linux | arm64       |
 
-- **macOS**:
-  - amd64
-  - arm64
-- **Windows**:
-  - amd64
-  - arm64
-- **Linux**:
-  - amd64
-  - arm64
-  - arm64-v8
+## Tool Inventory
 
-### Building the Docker Image Locally
+All versions are pinned via `ARG` in the Dockerfile for reproducibility.
 
-To build the Docker image, run the following command:
+### Cloud CLIs
+
+| Tool      | Version | Purpose            |
+|-----------|---------|--------------------|
+| AWS CLI   | 2.24.4  | AWS management     |
+| gcloud    | 514.0.0 | GCP management     |
+| Azure CLI | latest  | Azure management   |
+| Vault     | 1.18.4  | Secrets management |
+
+### Languages & Runtimes
+
+| Tool    | Version | Purpose          |
+|---------|---------|------------------|
+| Go      | 1.23.5  | Go development   |
+| Python  | 3.x     | Python scripting |
+| Node.js | 22.x    | JS runtime       |
+| pip     | latest  | Python packages  |
+
+### Container & Image Tools
+
+| Tool     | Version | Purpose               |
+|----------|---------|-----------------------|
+| Docker   | latest  | Container CLI         |
+| buildx   | latest  | Multi-platform builds |
+| Trivy    | 0.58.2  | Vulnerability scanner |
+| hadolint | 2.12.0  | Dockerfile linter     |
+| dive     | 0.12.0  | Image layer explorer  |
+
+### Kubernetes & IaC
+
+| Tool      | Version | Purpose              |
+|-----------|---------|----------------------|
+| kubectl   | 1.32.1  | Cluster management   |
+| Helm      | 3.17.0  | Chart management     |
+| Terraform | 1.10.5  | Infrastructure as code |
+
+### Debugging
+
+| Tool     | Purpose                  |
+|----------|--------------------------|
+| strace   | System call tracing      |
+| ltrace   | Library call tracing     |
+| tcpdump  | Packet capture           |
+| net-tools| netstat, ifconfig, etc.  |
+| dnsutils | dig, nslookup            |
+| htop     | Process monitoring       |
+
+### Build & Dev Utilities
+
+| Tool       | Purpose                |
+|------------|------------------------|
+| git        | Version control        |
+| make       | Build automation       |
+| curl       | HTTP client            |
+| wget       | File downloads         |
+| jq         | JSON processing        |
+| yq         | YAML processing        |
+| vim        | Text editor            |
+| shellcheck | Shell script linter    |
+| unzip      | Archive extraction     |
+
+## Usage Examples
+
+### CI Pipeline Base Image
+
+```yaml
+jobs:
+  deploy:
+    container:
+      image: ghcr.io/decima-cloud/builder:latest
+    steps:
+      - run: terraform init && terraform apply -auto-approve
+```
+
+### Debugging a Running Container
 
 ```sh
-docker build -t builder:latest .
+docker run --rm -it \
+  --pid=host --net=host \
+  ghcr.io/decima-cloud/builder:latest
 ```
 
-## Customization
+### Building and Scanning Images
 
-If you need to customize the Dockerfile to include additional tools or dependencies, you can modify the `Dockerfile` directly. Here are some common customizations:
-
-### Adding New Tools
-
-To add a new tool, you can include the installation commands in the build stage of the Dockerfile. For example, to add `wget`, you can modify the `Dockerfile` as follows:
-
-```dockerfile
-# Install wget
-RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+```sh
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/decima-cloud/builder:latest \
+  sh -c "docker build -t myapp . && trivy image myapp"
 ```
 
-### Adding New Programming Languages
+### Linting Dockerfiles
 
-To add a new programming language, you can include the installation commands in the build stage of the Dockerfile. For example, to add Ruby, you can modify the `Dockerfile` as follows(this is just an example ruby is installed already):
-
-```dockerfile
-# Install Ruby
-RUN apt-get update && apt-get install -y ruby && rm -rf /var/lib/apt/lists/*
+```sh
+docker run --rm -v "$(pwd)":/work -w /work \
+  ghcr.io/decima-cloud/builder:latest \
+  hadolint Dockerfile
 ```
+
+## Image Tags
+
+| Tag Format   | Example          | Description                     |
+|-------------|------------------|---------------------------------|
+| `latest`    | `latest`         | Latest build from main          |
+| `YYYYMMDD`  | `20260301`       | Date-stamped build              |
+| `vX.Y.Z`    | `v1.0.0`         | Semantic version release        |
+| `vX.Y`      | `v1.0`           | Minor version (tracks patches)  |
+| `<sha>`     | `a1b2c3d`        | Specific commit                 |
+
+## Image Size
+
+Target: ~1 GB (down from 3.5-5.5 GB). Achieved through:
+- Multi-stage build (download stage discarded)
+- Removed unused languages (Java 11, Ruby, Rust)
+- `--no-install-recommends` on all apt installs
+- Apt lists cleaned in the same layer as installs
 
 ## Contributing
 
-We welcome contributions from the community! If you have any improvements or new features to add, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bugfix.
-3. Make your changes and commit them with a descriptive message.
-4. Push your changes to your forked repository.
-5. Create a pull request to the main repository.
+1. Fork the repository
+2. Create a feature branch
+3. Update tool versions by changing the `ARG` values in the Dockerfile
+4. Run validation locally: `docker build -t builder:test . && docker run --rm builder:test validate-tools.sh`
+5. Open a pull request — CI will lint, build, scan, and test automatically
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
-
-## Acknowledgements
-
-We would like to thank the open-source community for their contributions and support.
-
-## Contact
-
-If you have any questions or need further assistance, please open an issue in the repository or contact the maintainers.
+MIT. See [LICENSE](LICENSE).
