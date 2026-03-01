@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+.DS_Store
+.gitignore
+.dockerignore
+LICENSE
+README.md
+*.tar
+*.tar.gz
