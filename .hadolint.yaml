@@ -1,0 +1,6 @@
+# DL3008: Pin versions in apt-get install
+# Ignored because system packages receive security patches via the weekly
+# scheduled rebuild. Pinning apt versions across amd64/arm64 is fragile
+# and defeats the purpose of automatic security updates.
+ignored:
+  - DL3008
