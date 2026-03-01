@@ -53,7 +53,7 @@ WORKDIR /staging
 # --- AWS CLI v2 ---
 RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
     && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_SUFFIX}-${AWSCLI_VERSION}.zip" -o awscli.zip \
-    && unzip -q awscli.zip \
+    && unzip -oq awscli.zip \
     && ./aws/install --install-dir /opt/aws-cli --bin-dir /usr/local/bin \
     && rm -rf awscli.zip aws/
 
@@ -65,7 +65,7 @@ RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm" || echo "x86_64") \
 
 # --- HashiCorp Vault ---
 RUN curl -fsSL "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_${TARGETARCH}.zip" -o vault.zip \
-    && unzip -q vault.zip -d /usr/local/bin \
+    && unzip -oq vault.zip -d /usr/local/bin \
     && rm vault.zip
 
 # --- Go ---
@@ -83,7 +83,7 @@ RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.ta
 
 # --- Terraform ---
 RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip" -o terraform.zip \
-    && unzip -q terraform.zip -d /usr/local/bin \
+    && unzip -oq terraform.zip -d /usr/local/bin \
     && rm terraform.zip
 
 # --- Trivy ---
