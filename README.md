@@ -46,7 +46,7 @@ All versions are pinned via `ARG` in the Dockerfile for reproducibility.
 |----------|---------|-----------------------|
 | Docker   | latest  | Container CLI         |
 | buildx   | latest  | Multi-platform builds |
-| Trivy    | 0.58.2  | Vulnerability scanner |
+| Trivy    | 0.69.2  | Vulnerability scanner |
 | hadolint | 2.12.0  | Dockerfile linter     |
 | dive     | 0.12.0  | Image layer explorer  |
 
