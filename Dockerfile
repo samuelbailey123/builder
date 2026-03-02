@@ -16,7 +16,7 @@ ARG NODE_MAJOR=22
 ARG KUBECTL_VERSION=1.32.1
 ARG HELM_VERSION=3.17.0
 ARG TERRAFORM_VERSION=1.10.5
-ARG TRIVY_VERSION=0.58.2
+ARG TRIVY_VERSION=0.69.2
 ARG HADOLINT_VERSION=2.12.0
 ARG DIVE_VERSION=0.12.0
 ARG YQ_VERSION=4.45.1
@@ -87,7 +87,8 @@ RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/te
     && rm terraform.zip
 
 # --- Trivy ---
-RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TARGETARCH}.tar.gz" \
+RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "ARM64" || echo "64bit") \
+    && curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${ARCH_SUFFIX}.tar.gz" \
        | tar -xz -C /usr/local/bin trivy
 
 # --- hadolint ---
