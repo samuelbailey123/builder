@@ -192,10 +192,26 @@ RUN setcap -r /usr/local/bin/vault || true
 # --- Validation script ---
 COPY scripts/validate-tools.sh /usr/local/bin/validate-tools.sh
 
+# --- Non-root user for runtime security ---
+# Many CI systems override the user, but defaulting to non-root reduces the
+# blast radius when running interactively or in less-controlled environments.
+RUN groupadd --gid 1000 builder \
+    && useradd --uid 1000 --gid builder --shell /bin/bash --create-home builder
+
+# --- Writable workspace owned by the non-root user ---
+RUN mkdir -p /workspace && chown builder:builder /workspace
+WORKDIR /workspace
+
 # --- OCI labels ---
 LABEL org.opencontainers.image.title="builder" \
       org.opencontainers.image.description="Pre-configured dev environment for debugging and building images" \
       org.opencontainers.image.source="https://github.com/decima-cloud/builder" \
       org.opencontainers.image.licenses="MIT"
+
+# --- Health check — validates core tools are functional ---
+HEALTHCHECK --interval=60s --timeout=10s --start-period=5s --retries=2 \
+    CMD bash -c 'command -v aws && command -v kubectl && command -v terraform' || exit 1
+
+USER builder
 
 CMD ["bash"]
