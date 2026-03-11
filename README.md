@@ -11,6 +11,12 @@ docker pull ghcr.io/decima-cloud/builder:latest
 docker run --rm -it ghcr.io/decima-cloud/builder:latest
 ```
 
+To run as root (required for some debugging tools like `strace` and `tcpdump`):
+
+```sh
+docker run --rm -it --user root ghcr.io/decima-cloud/builder:latest
+```
+
 ## Supported Platforms
 
 | OS    | Architecture |
@@ -99,7 +105,7 @@ jobs:
 ### Debugging a Running Container
 
 ```sh
-docker run --rm -it \
+docker run --rm -it --user root \
   --pid=host --net=host \
   ghcr.io/decima-cloud/builder:latest
 ```
@@ -120,6 +126,31 @@ docker run --rm -v "$(pwd)":/work -w /work \
   hadolint Dockerfile
 ```
 
+## Configuration
+
+### Tool Versions
+
+All tool versions are controlled via `ARG` declarations at the top of the Dockerfile. To pin a different version, update the corresponding `ARG` value:
+
+```dockerfile
+ARG KUBECTL_VERSION=1.32.1
+ARG HELM_VERSION=3.17.0
+ARG TERRAFORM_VERSION=1.10.5
+```
+
+### Environment Variables
+
+| Variable            | Default                                          | Purpose                        |
+|---------------------|--------------------------------------------------|--------------------------------|
+| `DEBIAN_FRONTEND`   | `noninteractive`                                 | Suppresses apt prompts         |
+| `PATH`              | Includes `/opt/google-cloud-sdk/bin`, `/usr/local/go/bin` | Tool discovery          |
+
+### Running as Root
+
+The image defaults to a non-root `builder` user (UID 1000). Some debugging tools (`strace`, `tcpdump`, `ltrace`) require elevated privileges. Override with `--user root` when needed.
+
+For CI systems that manage their own user context (GitHub Actions, GitLab CI), the user is typically overridden automatically.
+
 ## Image Tags
 
 | Tag Format   | Example          | Description                     |
@@ -137,6 +168,134 @@ Target: ~1 GB (down from 3.5-5.5 GB). Achieved through:
 - Removed unused languages (Java 11, Ruby, Rust)
 - `--no-install-recommends` on all apt installs
 - Apt lists cleaned in the same layer as installs
+
+## Security
+
+### Non-Root Default
+
+The container runs as user `builder` (UID 1000) by default. This limits the blast radius if a tool or script is compromised. Override with `--user root` only when necessary.
+
+### Image Scanning
+
+Every push to `main` triggers a Trivy vulnerability scan. Results are uploaded as SARIF to GitHub Security so that CRITICAL and HIGH findings appear in the repository's Security tab.
+
+### Supply Chain
+
+- All binary downloads use HTTPS with `curl -fsSL` (fail on HTTP errors, follow redirects, silent).
+- Tool versions are pinned by exact version number, not `latest` tags.
+- The weekly scheduled rebuild picks up OS-level security patches from the Ubuntu base image.
+- Multi-stage build ensures download-stage tools (extra curl, unzip) are not present in the final image.
+
+### Secrets Handling
+
+This image does not embed any credentials. Cloud CLI authentication should be provided at runtime via:
+- Mounted service account keys or token files
+- Environment variables (`AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, etc.)
+- CI-native secret injection (GitHub Actions secrets, GitLab CI variables)
+
+Never bake credentials into derived images.
+
+## Observability
+
+### Validation Script
+
+The built-in `validate-tools.sh` script checks every installed tool and reports pass/fail counts. Run it to verify image integrity:
+
+```sh
+docker run --rm ghcr.io/decima-cloud/builder:latest validate-tools.sh
+```
+
+### Health Check
+
+The Dockerfile includes a `HEALTHCHECK` instruction that verifies core tools (`aws`, `kubectl`, `terraform`) are present. Container orchestrators that support health checks will monitor this automatically.
+
+### CI Pipeline Reporting
+
+The CI workflow produces:
+- **Lint results** from hadolint (Dockerfile) and shellcheck (shell scripts)
+- **Trivy SARIF** uploaded to GitHub Security for vulnerability tracking
+- **Image size report** in the GitHub Actions step summary
+- **Tool validation output** from `validate-tools.sh`
+
+## Scalability
+
+### Multi-Platform Builds
+
+The image is built for both `linux/amd64` and `linux/arm64` using Docker Buildx with QEMU emulation. This allows the same image tag to run on x86 servers, ARM-based CI runners, and Apple Silicon development machines.
+
+### Build Caching
+
+The CI pipeline uses GitHub Actions cache (`type=gha`) for Docker layer caching. This significantly reduces rebuild times when only a few tool versions change, since earlier layers are reused.
+
+### Extending the Image
+
+To add tools to the image, follow the established pattern:
+
+1. **Add a pinned version ARG** at the top of the Dockerfile:
+   ```dockerfile
+   ARG NEWTOOL_VERSION=1.2.3
+   ```
+
+2. **Download in the downloader stage** using the architecture-aware pattern:
+   ```dockerfile
+   RUN ARCH_SUFFIX=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
+       && curl -fsSL "https://example.com/newtool-v${NEWTOOL_VERSION}-linux-${ARCH_SUFFIX}.tar.gz" \
+          | tar -xz -C /usr/local/bin newtool
+   ```
+
+3. **Copy into the final stage**:
+   ```dockerfile
+   COPY --from=downloader /usr/local/bin/newtool /usr/local/bin/newtool
+   ```
+
+4. **Add a validation check** in `scripts/validate-tools.sh`:
+   ```bash
+   check "newtool" newtool --version
+   ```
+
+5. **Update the tool inventory** table in this README.
+
+### Deriving Custom Images
+
+For project-specific tooling, create a downstream Dockerfile:
+
+```dockerfile
+FROM ghcr.io/decima-cloud/builder:latest
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends <package> \
+    && rm -rf /var/lib/apt/lists/*
+USER builder
+```
+
+## Disaster Recovery
+
+### Rebuild from Source
+
+The image is fully reproducible from the Dockerfile alone. If the GHCR registry is unavailable or the image is corrupted:
+
+```sh
+git clone https://github.com/decima-cloud/builder.git
+cd builder
+docker build -t builder:local .
+docker run --rm builder:local validate-tools.sh
+```
+
+### Pinned Versions
+
+All tool versions are pinned in the Dockerfile. This means a rebuild from the same commit will produce a functionally identical image (OS packages may differ due to apt updates, which is intentional for security patches).
+
+### Rollback
+
+To roll back to a previous version, pull by date tag or commit SHA:
+
+```sh
+docker pull ghcr.io/decima-cloud/builder:20260301
+docker pull ghcr.io/decima-cloud/builder:a1b2c3d
+```
+
+### Weekly Scheduled Rebuild
+
+The CI pipeline runs a weekly scheduled build (Monday 06:00 UTC) to pick up base image security patches. This ensures the image stays current even without code changes.
 
 ## Contributing
 
