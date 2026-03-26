@@ -10,6 +10,11 @@ on:
     - cron: "0 6 * * 1"   # weekly Monday 06:00 UTC
   workflow_dispatch:
 
+# Security: prevent fork PRs from running on self-hosted runners.
+# The build job uses a self-hosted runner and must only run for
+# pushes, schedules, workflow_dispatch, or PRs from this repo.
+# Fork PRs are restricted to the lint job (GitHub-hosted runner).
+
 permissions:
   contents: read
   packages: write
@@ -21,7 +26,7 @@ env:
 
 jobs:
   # -------------------------------------------------------------------
-  # Lint — hadolint Dockerfile linting
+  # Lint — hadolint Dockerfile linting (lightweight, stays on GitHub-hosted)
   # -------------------------------------------------------------------
   lint:
     runs-on: ubuntu-latest
@@ -34,11 +39,12 @@ jobs:
           dockerfile: Dockerfile
 
   # -------------------------------------------------------------------
-  # Build — multi-platform image, push to GHCR
+  # Build — multi-platform image on self-hosted Mac Mini, push to GHCR
   # -------------------------------------------------------------------
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mac-mini]
     needs: lint
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     outputs:
       digest: ${{ steps.build-push.outputs.digest }}
     steps:
@@ -77,7 +83,7 @@ jobs:
           context: .
           # Multi-platform on push; single platform on PR (--load does not
           # support manifest lists, so we build only the runner's native arch)
-          platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64,linux/arm64' || 'linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -89,7 +95,7 @@ jobs:
   # Scan — Trivy vulnerability scanning with SARIF upload
   # -------------------------------------------------------------------
   scan:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mac-mini]
     needs: build
     if: github.event_name != 'pull_request'
     steps:
@@ -112,7 +118,7 @@ jobs:
   # Test — run validate-tools.sh inside the built image
   # -------------------------------------------------------------------
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mac-mini]
     needs: build
     if: github.event_name != 'pull_request'
     steps:
@@ -133,7 +139,7 @@ jobs:
   # Size report — output image size to step summary
   # -------------------------------------------------------------------
   size-report:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mac-mini]
     needs: build
     if: github.event_name != 'pull_request'
     steps:
