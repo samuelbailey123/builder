@@ -45,6 +45,7 @@ ARG YQ_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        python3 \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
