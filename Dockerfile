@@ -174,8 +174,14 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
 
 # --- Copy binaries from downloader stage ---
 COPY --from=downloader /opt/aws-cli           /opt/aws-cli
-COPY --from=downloader /usr/local/bin/aws     /usr/local/bin/aws
-COPY --from=downloader /usr/local/bin/aws_completer /usr/local/bin/aws_completer
+# Re-create the AWS CLI wrapper symlinks in the final stage.
+# The installer writes relative symlinks into /usr/local/bin pointing at
+# /opt/aws-cli/v2/current/bin/*. Docker COPY preserves symlink targets
+# verbatim, so those paths must exist in the final image — which they do
+# because we copied /opt/aws-cli above. We still re-create them with ln -sf
+# to be explicit and ensure correctness regardless of builder behaviour.
+RUN ln -sf /opt/aws-cli/v2/current/bin/aws            /usr/local/bin/aws \
+    && ln -sf /opt/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer
 COPY --from=downloader /opt/google-cloud-sdk  /opt/google-cloud-sdk
 COPY --from=downloader /usr/local/bin/vault   /usr/local/bin/vault
 COPY --from=downloader /usr/local/go          /usr/local/go
